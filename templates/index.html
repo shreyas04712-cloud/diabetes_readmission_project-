@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Diabetes Readmission Risk Predictor</title>
+  <meta name="description" content="AI-powered clinical tool predicting 30-day hospital readmission risk for diabetic patients using three parallel ML models."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+
+  <!-- ── Background orbs ─────────────────────────────────────── -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="logo">
+      <span class="logo-text">Diabetes Readmission <strong>Risk Predictor</strong></span>
+    </div>
+    <p class="header-tagline">30-Day Readmission Risk · Three Parallel AI Models</p>
+  </header>
+
+  <!-- ── Main ────────────────────────────────────────────────── -->
+  <main class="container">
+
+    <!-- Hero -->
+    <section class="hero">
+      <h1>Predict Readmission Risk</h1>
+      <p>Enter patient data below. Three clinical AI models (CatBoost, Random Forest &amp; Stacking Ensemble) will run in parallel and each return an independent prediction.</p>
+    </section>
+
+    <!-- ── Form card ────────────────────────────────────────── -->
+    <form id="predict-form" class="glass-card" novalidate>
+
+      <!-- Section: Patient Demographics -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">01</span> Patient Demographics</h2>
+        <div class="form-grid">
+
+          <div class="field">
+            <label for="age">Age Group</label>
+            <select id="age" name="age" required>
+              <option value="">Select…</option>
+              <option value="[0-10)">[0–10)</option>
+              <option value="[10-20)">[10–20)</option>
+              <option value="[20-30)">[20–30)</option>
+              <option value="[30-40)">[30–40)</option>
+              <option value="[40-50)">[40–50)</option>
+              <option value="[50-60)" selected>[50–60)</option>
+              <option value="[60-70)">[60–70)</option>
+              <option value="[70-80)">[70–80)</option>
+              <option value="[80-90)">[80–90)</option>
+              <option value="[90-100)">[90–100)</option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Section: Diagnoses -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">02</span> Diagnosis Codes (ICD-9)</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="diag_1">Primary Diagnosis</label>
+            <input type="text" id="diag_1" name="diag_1" placeholder="e.g. 428" value="428"/>
+            <span class="hint">Heart failure = 428, Diabetes = 250, Pneumonia = 486</span>
+          </div>
+          <div class="field">
+            <label for="diag_2">Secondary Diagnosis</label>
+            <input type="text" id="diag_2" name="diag_2" placeholder="e.g. 250" value="250"/>
+          </div>
+          <div class="field">
+            <label for="diag_3">Tertiary Diagnosis</label>
+            <input type="text" id="diag_3" name="diag_3" placeholder="e.g. 276" value="276"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Hospital Visit Details -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">03</span> Hospital Visit Details</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="time_in_hospital">Days in Hospital</label>
+            <input type="number" id="time_in_hospital" name="time_in_hospital" min="1" max="14" value="4"/>
+          </div>
+          <div class="field">
+            <label for="num_lab_procedures">Lab Procedures</label>
+            <input type="number" id="num_lab_procedures" name="num_lab_procedures" min="0" value="45"/>
+          </div>
+          <div class="field">
+            <label for="num_procedures">Non-Lab Procedures</label>
+            <input type="number" id="num_procedures" name="num_procedures" min="0" value="1"/>
+          </div>
+          <div class="field">
+            <label for="num_medications">Medications</label>
+            <input type="number" id="num_medications" name="num_medications" min="0" value="15"/>
+          </div>
+          <div class="field">
+            <label for="number_diagnoses">Number of Diagnoses</label>
+            <input type="number" id="number_diagnoses" name="number_diagnoses" min="1" value="7"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Utilisation History -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">04</span> Prior Utilisation (Past Year)</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="number_outpatient">Outpatient Visits</label>
+            <input type="number" id="number_outpatient" name="number_outpatient" min="0" value="0"/>
+          </div>
+          <div class="field">
+            <label for="number_emergency">Emergency Visits</label>
+            <input type="number" id="number_emergency" name="number_emergency" min="0" value="0"/>
+          </div>
+          <div class="field">
+            <label for="number_inpatient">Inpatient Visits</label>
+            <input type="number" id="number_inpatient" name="number_inpatient" min="0" value="0"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Lab Results -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">05</span> Lab Results</h2>
+        <div class="form-grid">
+          <div class="field">
+            <label for="max_glu_serum">Max Glucose Serum</label>
+            <select id="max_glu_serum" name="max_glu_serum">
+              <option value="No" selected>Not Tested / None</option>
+              <option value="Norm">Normal</option>
+              <option value=">200">&gt;200</option>
+              <option value=">300">&gt;300</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="A1Cresult">HbA1c Result</label>
+            <select id="A1Cresult" name="A1Cresult">
+              <option value="No" selected>Not Tested / None</option>
+              <option value="Norm">Normal</option>
+              <option value=">7">&gt;7%</option>
+              <option value=">8">&gt;8%</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Medications -->
+      <div class="form-section">
+        <h2 class="section-title"><span class="section-num">06</span> Diabetes Medications</h2>
+
+        <div class="med-top-row form-grid">
+          <div class="field">
+            <label for="insulin">Insulin</label>
+            <select id="insulin" name="insulin">
+              <option value="No" selected>No</option>
+              <option value="Steady">Steady</option>
+              <option value="Up">Up</option>
+              <option value="Down">Down</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="metformin">Metformin</label>
+            <select id="metformin" name="metformin">
+              <option value="No" selected>No</option>
+              <option value="Steady">Steady</option>
+              <option value="Up">Up</option>
+              <option value="Down">Down</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="glipizide">Glipizide</label>
+            <select id="glipizide" name="glipizide">
+              <option value="No" selected>No</option>
+              <option value="Steady">Steady</option>
+              <option value="Up">Up</option>
+              <option value="Down">Down</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="glyburide">Glyburide</label>
+            <select id="glyburide" name="glyburide">
+              <option value="No" selected>No</option>
+              <option value="Steady">Steady</option>
+              <option value="Up">Up</option>
+              <option value="Down">Down</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Collapsible: other medications -->
+        <details class="med-extra">
+          <summary>Show all other medications</summary>
+          <div class="form-grid" style="margin-top:1rem;">
+            {% set other_meds = [
+              ('repaglinide','Repaglinide'), ('nateglinide','Nateglinide'),
+              ('chlorpropamide','Chlorpropamide'), ('glimepiride','Glimepiride'),
+              ('acetohexamide','Acetohexamide'), ('tolbutamide','Tolbutamide'),
+              ('pioglitazone','Pioglitazone'), ('rosiglitazone','Rosiglitazone'),
+              ('acarbose','Acarbose'), ('miglitol','Miglitol'),
+              ('troglitazone','Troglitazone'), ('tolazamide','Tolazamide'),
+              ('examide','Examide'), ('citoglipton','Citoglipton'),
+              ('glyburide-metformin','Glyburide-Metformin'),
+              ('glipizide-metformin','Glipizide-Metformin'),
+              ('glimepiride-pioglitazone','Glimepiride-Pioglitazone'),
+              ('metformin-rosiglitazone','Metformin-Rosiglitazone'),
+              ('metformin-pioglitazone','Metformin-Pioglitazone')
+            ] %}
+            {% for field_id, label_text in other_meds %}
+            <div class="field">
+              <label for="{{ field_id }}">{{ label_text }}</label>
+              <select id="{{ field_id }}" name="{{ field_id }}">
+                <option value="No" selected>No</option>
+                <option value="Steady">Steady</option>
+                <option value="Up">Up</option>
+                <option value="Down">Down</option>
+              </select>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+
+        <!-- Medication flags -->
+        <div class="form-grid" style="margin-top:1.5rem;">
+          <div class="field">
+            <label for="change">Medication Change?</label>
+            <select id="change" name="change">
+              <option value="No" selected>No Change</option>
+              <option value="Ch">Changed (Ch)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="diabetesMed">On Diabetes Medication?</label>
+            <select id="diabetesMed" name="diabetesMed">
+              <option value="Yes" selected>Yes</option>
+              <option value="No">No</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="submit-row">
+        <button type="submit" id="submit-btn" class="btn-predict">
+          <span class="btn-text">Run Prediction</span>
+          <span class="btn-loader" hidden>
+            <span class="spinner"></span> Running models…
+          </span>
+        </button>
+      </div>
+
+    </form><!-- /form -->
+
+    <!-- ── Results section ──────────────────────────────────── -->
+    <section id="results-section" class="results-section" hidden>
+
+      <h2 class="results-heading">Model Predictions</h2>
+      <p class="results-sub">Each model ran independently in parallel using its own calibrated threshold.</p>
+
+      <div class="results-grid" id="results-grid">
+
+        <!-- CatBoost -->
+        <div class="result-card" id="card-catboost">
+          <div class="model-badge catboost-badge">CatBoost</div>
+          <div class="verdict-icon" id="icon-catboost"></div>
+          <div class="verdict-label" id="label-catboost">—</div>
+          <div class="prob-bar-wrap">
+            <div class="prob-bar" id="bar-catboost"></div>
+          </div>
+          <div class="prob-value" id="prob-catboost">— %</div>
+          <p class="model-desc">Gradient boosting optimised for categorical data. Threshold: 13.2%</p>
+        </div>
+
+        <!-- Random Forest -->
+        <div class="result-card" id="card-rf">
+          <div class="model-badge rf-badge">Random Forest</div>
+          <div class="verdict-icon" id="icon-rf"></div>
+          <div class="verdict-label" id="label-rf">—</div>
+          <div class="prob-bar-wrap">
+            <div class="prob-bar" id="bar-rf"></div>
+          </div>
+          <div class="prob-value" id="prob-rf">— %</div>
+          <p class="model-desc">Ensemble of decision trees using majority voting. Threshold: 13.9%</p>
+        </div>
+
+        <!-- Stacking -->
+        <div class="result-card" id="card-stacking">
+          <div class="model-badge stacking-badge">Stacking Ensemble</div>
+          <div class="verdict-icon" id="icon-stacking"></div>
+          <div class="verdict-label" id="label-stacking">—</div>
+          <div class="prob-bar-wrap">
+            <div class="prob-bar" id="bar-stacking"></div>
+          </div>
+          <div class="prob-value" id="prob-stacking">— %</div>
+          <p class="model-desc">Meta-learner combining CatBoost &amp; Random Forest outputs. Threshold: 12.6%</p>
+        </div>
+
+      </div><!-- /results-grid -->
+
+      <div class="results-footer">
+        <p>⚠ For clinical support only. Final decisions must be made by a licensed healthcare professional.</p>
+      </div>
+    </section>
+
+    <!-- Error banner -->
+    <div id="error-banner" class="error-banner" hidden>
+      <span id="error-text"></span>
+    </div>
+
+  </main><!-- /main -->
+
+  <footer class="site-footer">
+    <p>Diabetes Readmission Risk Predictor · Built with CatBoost, Random Forest &amp; Stacking Ensemble</p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

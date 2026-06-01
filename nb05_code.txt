@@ -1,0 +1,425 @@
+%pip install pandas numpy scikit-learn xgboost lightgbm joblib catboost pytorch-tabnet tensorflow --quiet
+
+import pandas as pd
+import numpy as np
+import joblib
+import os
+
+from sklearn.base import clone
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier, ExtraTreesClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
+from sklearn.metrics import classification_report, roc_auc_score
+
+RANDOM_STATE = 42
+TEST_SIZE    = 0.20
+
+MODEL_DIR = "/content/models"
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+print("All imports and directory setup successful.")
+---
+df = pd.read_csv("/content/diabetes_model_base.csv")
+
+# ── Fix: pandas 2.0+ reads string columns as StringDtype by default.
+# sklearn's ColumnTransformer requires object dtype for column name lookup.
+CATEGORICAL_COLS_RAW = ["primary_diagnosis_group_reduced", "age_risk_group"]
+for col in CATEGORICAL_COLS_RAW:
+    df[col] = df[col].astype(object)
+
+print("Shape         :", df.shape)
+print("Null values   :", df.isna().sum().sum())
+print("\nDtypes of categorical columns after fix:")
+print(df[CATEGORICAL_COLS_RAW].dtypes)
+print("\nTarget distribution:")
+print(df["readmit_30"].value_counts(normalize=True).round(4))
+
+---
+base_table = pd.read_csv(
+    "/content/diabetic_data_base_table.csv",
+    usecols=["patient_nbr"],
+    low_memory=False
+)
+
+df["patient_nbr"] = base_table["patient_nbr"].values
+
+patient_labels = (
+    df.groupby("patient_nbr")["readmit_30"]
+    .max()
+    .reset_index()
+)
+
+train_patients, test_patients = train_test_split(
+    patient_labels["patient_nbr"],
+    test_size=TEST_SIZE,
+    stratify=patient_labels["readmit_30"],
+    random_state=RANDOM_STATE
+)
+
+train_df = df[df["patient_nbr"].isin(train_patients)].drop(columns=["patient_nbr"])
+test_df  = df[df["patient_nbr"].isin(test_patients)].drop(columns=["patient_nbr"])
+df.drop(columns=["patient_nbr"], inplace=True)
+
+print(f"Train encounters : {len(train_df):,}  |  Positive rate: {train_df['readmit_30'].mean():.4f}")
+print(f"Test  encounters : {len(test_df):,}   |  Positive rate: {test_df['readmit_30'].mean():.4f}")
+---
+TARGET = "readmit_30"
+
+X_train = train_df.drop(columns=[TARGET])
+y_train = train_df[TARGET]
+
+X_test  = test_df.drop(columns=[TARGET])
+y_test  = test_df[TARGET]
+
+print("X_train:", X_train.shape, "  X_test:", X_test.shape)
+print("y_train positives:", y_train.sum(), "  y_test positives:", y_test.sum())
+---
+CATEGORICAL_COLS = [
+    "primary_diagnosis_group_reduced",
+    "age_risk_group"
+]
+
+NUMERIC_COLS = [c for c in X_train.columns if c not in CATEGORICAL_COLS]
+
+print("Categorical features:", CATEGORICAL_COLS)
+print("Numeric features    :", NUMERIC_COLS)
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("cat", OneHotEncoder(drop="first", handle_unknown="ignore", sparse_output=False), CATEGORICAL_COLS),
+        ("num", StandardScaler(), NUMERIC_COLS)
+    ],
+    remainder="drop"
+)
+
+print("\nPreprocessor template configured.")
+---
+neg_count        = (y_train == 0).sum()
+pos_count        = (y_train == 1).sum()
+scale_pos_weight = neg_count / pos_count
+
+print(f"Negative train samples : {neg_count:,}")
+print(f"Positive train samples : {pos_count:,}")
+print(f"scale_pos_weight       : {scale_pos_weight:.2f}")
+---
+# -- 1. Logistic Regression --
+pipeline_lr = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", LogisticRegression(class_weight="balanced", C=0.1, max_iter=1000, solver="lbfgs", random_state=RANDOM_STATE))
+])
+
+# -- 2. Decision Tree --
+pipeline_dt = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", DecisionTreeClassifier(max_depth=6, min_samples_leaf=100, class_weight="balanced", random_state=RANDOM_STATE))
+])
+
+# -- 3. Random Forest --
+pipeline_rf = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", RandomForestClassifier(n_estimators=300, max_depth=12, min_samples_leaf=10, class_weight="balanced_subsample", n_jobs=-1, random_state=RANDOM_STATE))
+])
+
+# -- 4. HistGradientBoosting --
+pipeline_hgb = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", HistGradientBoostingClassifier(max_iter=300, max_depth=6, learning_rate=0.05, class_weight="balanced", random_state=RANDOM_STATE))
+])
+
+# -- 5. XGBoost --
+pipeline_xgb = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", XGBClassifier(n_estimators=400, max_depth=5, learning_rate=0.03, scale_pos_weight=scale_pos_weight, eval_metric="aucpr", n_jobs=-1, random_state=RANDOM_STATE))
+])
+
+# -- 6. LightGBM --
+pipeline_lgbm = Pipeline(steps=[
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", LGBMClassifier(n_estimators=400, max_depth=7, learning_rate=0.03, class_weight="balanced", n_jobs=-1, random_state=RANDOM_STATE, verbose=-1))
+])
+
+# -- 7. ExtraTrees --
+pipeline_et = Pipeline([
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", ExtraTreesClassifier(n_estimators=300, random_state=RANDOM_STATE, n_jobs=-1))
+])
+
+# -- 8. GradientBoosting --
+pipeline_gb = Pipeline([
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", GradientBoostingClassifier(n_estimators=200, learning_rate=0.05, max_depth=3, random_state=RANDOM_STATE))
+])
+
+# -- 9. SVM (Optimized with Subsampling for speed) --
+from sklearn.kernel_approximation import Nystroem
+from sklearn.linear_model import SGDClassifier
+
+# Standard SVC is too slow for 80k rows. Using LinearSVC or subsampling is recommended.
+# Here we use a 10k sample subset for the standard SVC to keep the non-linear capability while ensuring it finishes.
+pipeline_svm = Pipeline([
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", SVC(probability=True, class_weight="balanced", max_iter=5000, random_state=RANDOM_STATE))
+])
+
+# -- 10. CatBoost --
+pipeline_cat = Pipeline([
+    ("preprocessor", clone(preprocessor)),
+    ("classifier", CatBoostClassifier(iterations=300, depth=6, learning_rate=0.05, loss_function="Logloss", verbose=0, random_state=RANDOM_STATE))
+])
+
+print("All pipelines defined. SVM optimized with iteration limits.")
+---
+models = {
+    "Logistic Regression"  : pipeline_lr,
+    "Decision Tree"        : pipeline_dt,
+    "Random Forest"        : pipeline_rf,
+    "HistGradientBoosting" : pipeline_hgb,
+    "XGBoost"              : pipeline_xgb,
+    "LightGBM"             : pipeline_lgbm,
+    "extra_trees"          : pipeline_et,
+    "gradient_boosting"    : pipeline_gb,
+    "svm"                  : pipeline_svm,
+    "catboost"             : pipeline_cat
+}
+
+for name, pipeline in models.items():
+    print(f"Training {name}...", end=" ", flush=True)
+    if name == "svm":
+        # Subsample specifically for SVM to prevent 1hr+ hang
+        X_svm, _, y_svm, _ = train_test_split(X_train, y_train, train_size=10000, stratify=y_train, random_state=RANDOM_STATE)
+        pipeline.fit(X_svm, y_svm)
+    else:
+        pipeline.fit(X_train, y_train)
+    print("Done.")
+
+print("\nAll registered models trained.")
+---
+header = f"{'Model':<25} {'Train ROC-AUC':>15} {'Train F1 (pos)':>15}"
+print(header)
+print("-" * len(header))
+
+for name, pipeline in models.items():
+    y_prob = pipeline.predict_proba(X_train)[:, 1]
+    y_pred = pipeline.predict(X_train)
+    auc    = roc_auc_score(y_train, y_prob)
+    report = classification_report(y_train, y_pred, output_dict=True)
+    f1_pos = report["1"]["f1-score"]
+    print(f"{name:<25} {auc:>15.4f} {f1_pos:>15.4f}")
+
+print("\nNote: in-sample scores only. Held-out evaluation is in Notebook 06.")
+---
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Input
+
+# Transform raw X_train into numeric features using the preprocessor
+X_train_transformed = preprocessor.transform(X_train)
+
+dnn_model = Sequential([
+    Input(shape=(X_train_transformed.shape[1],)),
+    Dense(128, activation="relu"),
+    Dropout(0.3),
+    Dense(64, activation="relu"),
+    Dropout(0.2),
+    Dense(1, activation="sigmoid")
+])
+
+dnn_model.compile(
+    optimizer="adam",
+    loss="binary_crossentropy",
+    metrics=["AUC"]
+)
+
+dnn_model.fit(
+    X_train_transformed,
+    y_train,
+    epochs=20,
+    batch_size=256,
+    verbose=1
+)
+
+dnn_probs = dnn_model.predict(X_train_transformed).ravel()
+---
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Input
+
+# Fix: Transform raw X_train into numeric features using the preprocessor
+X_train_transformed = preprocessor.transform(X_train)
+
+dnn_model = Sequential([
+    Input(shape=(X_train_transformed.shape[1],)),
+    Dense(128, activation="relu"),
+    Dropout(0.3),
+    Dense(64, activation="relu"),
+    Dropout(0.2),
+    Dense(1, activation="sigmoid")
+])
+
+dnn_model.compile(
+    optimizer="adam",
+    loss="binary_crossentropy",
+    metrics=["AUC"]
+)
+
+dnn_model.fit(
+    X_train_transformed,
+    y_train,
+    epochs=20,
+    batch_size=256,
+    verbose=1
+)
+
+dnn_probs = dnn_model.predict(X_train_transformed).ravel()
+---
+from pytorch_tabnet.tab_model import TabNetClassifier
+
+# Transform data using the existing preprocessor
+X_train_transformed = preprocessor.fit_transform(X_train)
+
+tabnet_model = TabNetClassifier(seed=RANDOM_STATE)
+
+tabnet_model.fit(
+    X_train_transformed,
+    y_train.values,
+    eval_set=[(X_train_transformed, y_train.values)],
+    eval_metric=["auc"],
+    max_epochs=50,
+    patience=10,
+    batch_size=1024,
+    virtual_batch_size=128
+)
+
+tabnet_probs = tabnet_model.predict_proba(X_train_transformed)[:, 1]
+---
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+
+# Transform data using the existing preprocessor
+X_train_transformed = preprocessor.transform(X_train)
+
+dnn_model = Sequential([
+    Dense(128, activation="relu", input_shape=(X_train_transformed.shape[1],)),
+    Dropout(0.3),
+    Dense(64, activation="relu"),
+    Dropout(0.2),
+    Dense(1, activation="sigmoid")
+])
+
+dnn_model.compile(
+    optimizer="adam",
+    loss="binary_crossentropy",
+    metrics=["AUC"]
+)
+
+dnn_model.fit(
+    X_train_transformed,
+    y_train,
+    epochs=20,
+    batch_size=256,
+    verbose=1
+)
+
+dnn_probs = dnn_model.predict(X_train_transformed).ravel()
+---
+MODEL_DIR = "/content/models"
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+# Save classical models
+filename_map = {
+    "Logistic Regression"  : "pipeline_lr.pkl",
+    "Decision Tree"        : "pipeline_dt.pkl",
+    "Random Forest"        : "pipeline_rf.pkl",
+    "HistGradientBoosting" : "pipeline_hgb.pkl",
+    "XGBoost"              : "pipeline_xgb.pkl",
+    "LightGBM"             : "pipeline_lgbm.pkl",
+    "extra_trees"          : "pipeline_et.pkl",
+    "gradient_boosting"    : "pipeline_gb.pkl",
+    "svm"                  : "pipeline_svm.pkl",
+    "catboost"             : "pipeline_cat.pkl"
+}
+
+for name, pipeline in models.items():
+    path = os.path.join(MODEL_DIR, filename_map[name])
+    joblib.dump(pipeline, path)
+
+# Save TabNet
+tabnet_model.save_model(os.path.join(MODEL_DIR, "tabnet_model"))
+
+# Save Keras DNN
+dnn_model.save(os.path.join(MODEL_DIR, "dnn_model.keras"))
+
+# Save test set
+X_test.to_csv(os.path.join(MODEL_DIR, "X_test.csv"), index=False)
+y_test.to_csv(os.path.join(MODEL_DIR, "y_test.csv"), index=False)
+
+print(f"All artifacts (Classical + DL) saved to: {MODEL_DIR}")
+---
+from pytorch_tabnet.tab_model import TabNetClassifier
+
+# Fix: Transform raw X_train into numeric features using the preprocessor
+X_train_transformed = preprocessor.transform(X_train)
+
+tabnet_model = TabNetClassifier(seed=RANDOM_STATE)
+
+tabnet_model.fit(
+    X_train_transformed,
+    y_train.values,
+    eval_set=[(X_train_transformed, y_train.values)],
+    eval_metric=["auc"],
+    max_epochs=50,
+    patience=10,
+    batch_size=1024,
+    virtual_batch_size=128
+)
+
+tabnet_probs = tabnet_model.predict_proba(X_train_transformed)[:, 1]
+---
+import pandas as pd
+from sklearn.metrics import roc_auc_score, f1_score
+
+# Prepare containers for results
+results = []
+
+# 1. Evaluate Classical Models
+for name, pipeline in models.items():
+    y_prob = pipeline.predict_proba(X_train)[:, 1]
+    y_pred = pipeline.predict(X_train)
+    auc = roc_auc_score(y_train, y_prob)
+    f1 = f1_score(y_train, y_pred)
+    results.append({"Model": name, "Train ROC-AUC": auc, "Train F1 (pos)": f1})
+
+# 2. Evaluate Keras DNN
+# Pre-transform X_train for deep learning models
+X_train_transformed = preprocessor.transform(X_train)
+
+dnn_probs = dnn_model.predict(X_train_transformed, verbose=0).ravel()
+dnn_preds = (dnn_probs > 0.5).astype(int)
+results.append({
+    "Model": "Keras DNN",
+    "Train ROC-AUC": roc_auc_score(y_train, dnn_probs),
+    "Train F1 (pos)": f1_score(y_train, dnn_preds)
+})
+
+# 3. Evaluate TabNet
+tabnet_probs = tabnet_model.predict_proba(X_train_transformed)[:, 1]
+tabnet_preds = tabnet_model.predict(X_train_transformed)
+results.append({
+    "Model": "TabNet",
+    "Train ROC-AUC": roc_auc_score(y_train, tabnet_probs),
+    "Train F1 (pos)": f1_score(y_train, tabnet_preds)
+})
+
+# Create and display DataFrame
+results_df = pd.DataFrame(results).sort_values(by="Train ROC-AUC", ascending=False)
+print("Final Model Comparison (In-Sample Performance):")
+display(results_df.style.format({"Train ROC-AUC": "{:.4f}", "Train F1 (pos)": "{:.4f}"}))
+---
+!zip -r /content/models_colab.zip /content/models_colab
+print("Archive created at /content/models_colab.zip")
